@@ -1,0 +1,15 @@
+[project]
+name = "interview_segmenter"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["networkx", "sentence-transformers"]
+
+[project.optional-dependencies]
+sat = ["wtpsplit"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["interview_segmenter"]
