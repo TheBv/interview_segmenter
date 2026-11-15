@@ -16,6 +16,7 @@ class Item:
     """One thing the interviewer is scripted to say (a question, or a battery sub-item)."""
     item_id: str
     text: str
+    categories: dict[str, str] | None = None   # code -> label, for coding closed answers
 
 
 @dataclass
@@ -50,7 +51,7 @@ class Match:
 # --- loaders --------------------------------------------------------------------
 
 def load_items(path: str | Path) -> list[Item]:
-    """Questionnaire in order. .json: [{"id", "text"}, ...]; .csv: columns id,text;
+    """Questionnaire in order. .json: [{"id", "text", "categories"?: {code: label}}, ...]; .csv: columns id,text;
     anything else: one item per line (id = line number)."""
     p = Path(path)
     if p.suffix == ".json":
@@ -60,7 +61,7 @@ def load_items(path: str | Path) -> list[Item]:
             rows = list(csv.DictReader(f))
     else:
         rows = [{"id": str(k), "text": t} for k, t in enumerate(p.read_text(encoding="utf-8").splitlines()) if t.strip()]
-    return [Item(str(r["id"]), r["text"].strip()) for r in rows]
+    return [Item(str(r["id"]), r["text"].strip(), r.get("categories")) for r in rows]
 
 
 def load_transcript(path: str | Path) -> Transcript:
@@ -142,22 +143,37 @@ def attach_times(matches: list[Match], tr: Transcript) -> list[Match]:
     return matches
 
 
-def answer_windows(asked: list[Match], respondent: Transcript) -> dict[str, tuple[int, int]]:
-    """Respondent units [from, to) answering each item: every unit that starts after the
-    item's first occurrence starts and before the next item is asked. The question's end
-    is deliberately not used: respondents often answer while options are still being read.
-
-    Both transcripts must be on one clock and `asked` timed (attach_times).
-    Items without a timed match, or without speech in their window, get no window."""
+def answer_spans(asked: list[Match]) -> dict[str, tuple[float, float]]:
+    """Time span of each item's answer: from the start of its first occurrence to the start
+    of the next item asked. The question's end is deliberately not used: respondents often
+    answer while options are still being read. `asked` must be timed (attach_times);
+    untimed matches are ignored."""
     timed = sorted((m for m in asked if m.start is not None), key=lambda m: m.start)
-    first = {}
-    for i, m in enumerate(timed):
-        first.setdefault(m.item_id, i)
     out = {}
-    for item_id, i in first.items():
-        lo = timed[i].start
-        hi = next((m.start for m in timed[i + 1:] if m.item_id != item_id), float("inf"))
+    for i, m in enumerate(timed):
+        if m.item_id not in out:
+            out[m.item_id] = (m.start, next((x.start for x in timed[i + 1:] if x.item_id != m.item_id), float("inf")))
+    return out
+
+
+def answer_windows(asked: list[Match], respondent: Transcript) -> dict[str, tuple[int, int]]:
+    """Respondent units [from, to) that start inside each item's answer span. Both
+    transcripts must be on one clock. Items without speech in their span get no window."""
+    out = {}
+    for item_id, (lo, hi) in answer_spans(asked).items():
         idx = [k for k, u in enumerate(respondent.units) if u.start is not None and lo <= u.start < hi]
         if idx:
             out[item_id] = (idx[0], idx[-1] + 1)
+    return out
+
+
+def answer_dialogues(asked: list[Match], interviewer: Transcript, respondent: Transcript,
+                     labels: tuple[str, str] = ("I", "R")) -> dict[str, str]:
+    """The answer span with both speakers, one "I: ..." / "R: ..." line per unit in time
+    order. Interviewers often echo or categorise the answer ("so, rather satisfied?")."""
+    out = {}
+    for item_id, (lo, hi) in answer_spans(asked).items():
+        lines = sorted((u.start, lab, u.text) for tr, lab in zip((interviewer, respondent), labels)
+                       for u in tr.units if u.start is not None and lo <= u.start < hi)
+        out[item_id] = "\n".join(f"{lab}: {t}" for _, lab, t in lines)
     return out

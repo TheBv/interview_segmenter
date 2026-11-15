@@ -1,6 +1,8 @@
 """Model-free checks of the solver and the answer rule: python test_segmenter.py"""
 
-from interview_segmenter import Item, Match, Transcript, Unit, answer_windows, attach_times, solve, split_speakers
+from interview_segmenter import (Item, Match, Transcript, Unit, answer_dialogues, answer_windows, attach_times,
+                                 flag, solve, split_speakers)
+from interview_segmenter.coding import parse
 
 items = [Item("q1", "a"), Item("q2", "b"), Item("q3", "c")]
 
@@ -18,4 +20,11 @@ tr = Transcript([Unit("Frage eins?", speaker="I"), Unit("Ja.", speaker="R"),
 interviewer, respondent = split_speakers(tr, "I")
 asked = attach_times([Match("q1", 0, 1), Match("q2", 1, 2)], interviewer)
 assert answer_windows(asked, respondent) == {"q1": (0, 1), "q2": (1, 3)}
+assert answer_dialogues(asked, interviewer, respondent) == {
+    "q1": "I: Frage eins?\nR: Ja.", "q2": "I: Frage zwei?\nR: Hm, zwei.\nR: Genau."}
+
+# coding: reply parsing and flagging (no model needed)
+assert parse("Says two.\nCode: 2") == ("2", "Says two.")
+assert parse("no code line")[0] == "error"
+assert flag({"q1": "1", "q2": "none"}, {"q1": 1, "q2": "3", "q3": "2"}) == ["q2"]
 print("ok")
